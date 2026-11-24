@@ -1,0 +1,57 @@
+# Azure Container Apps definition for the JournL MCP server.
+# Replace the <…> values, then: az containerapp create -g <rg> -n journl-mcp --yaml deploy/containerapp.yaml
+# Exactly ONE replica: sign-in sessions and rate limits live in memory.
+location: centralindia
+properties:
+  managedEnvironmentId: /subscriptions/<subscription-id>/resourceGroups/<rg>/providers/Microsoft.App/managedEnvironments/<env-name>
+  configuration:
+    activeRevisionsMode: Single
+    ingress:
+      external: true
+      targetPort: 3100
+      transport: http
+      allowInsecure: false
+    registries:
+      - server: <acr-name>.azurecr.io
+        identity: system
+    secrets:
+      - name: openai-apps-challenge
+        value: "<token from the OpenAI plugin portal, or a placeholder until then>"
+  template:
+    containers:
+      - name: journl-mcp
+        image: <acr-name>.azurecr.io/journl-mcp:1.0.0
+        resources:
+          cpu: 0.5
+          memory: 1Gi
+        env:
+          - name: PUBLIC_URL
+            value: https://mcp.journl.in
+          - name: JOURNL_API_BASE_URL
+            # Production API per the JournL client's .env (test is https://testapi.bizpolebooks.com). Confirm before deploying.
+            value: https://api.bizpolebooks.com
+          - name: PRIVACY_POLICY_URL
+            value: https://journl.in/privacy
+          - name: OPENAI_APPS_CHALLENGE
+            secretRef: openai-apps-challenge
+        volumeMounts:
+          - volumeName: data
+            mountPath: /app/data
+        probes:
+          - type: Liveness
+            httpGet: { path: /health, port: 3100 }
+            periodSeconds: 30
+          - type: Readiness
+            httpGet: { path: /health, port: 3100 }
+            periodSeconds: 10
+    scale:
+      minReplicas: 1
+      maxReplicas: 1
+    volumes:
+      - name: data
+        storageType: AzureFile
+        storageName: journlmcpdata
+        # SMB mount owned by the image's non-root `node` user (uid/gid 1000), private to it.
+        mountOptions: "uid=1000,gid=1000,dir_mode=0700,file_mode=0600"
+identity:
+  type: SystemAssigned
