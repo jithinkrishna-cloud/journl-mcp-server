@@ -5,7 +5,7 @@ import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:net";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -23,12 +23,15 @@ const freePort = () =>
 let journl, mcpServer, base;
 const REDIRECT = "https://chatgpt.com/connector_platform_oauth_redirect";
 const LEGACY_CLIENT_ID = "legacy-evil-client"; // saved before the redirect allowlist existed
+const RESTORED_CLIENT_ID = "21c78959-0000-4000-8000-000000000000"; // held by ChatGPT, lost by the server
+const RESTORED_REDIRECT = "https://chatgpt.com/connector/oauth/Restored123";
+let clientsFile;
 
 before(async () => {
   journl = await startMockJournl();
   const port = await freePort();
   base = `http://localhost:${port}`;
-  const clientsFile = join(mkdtempSync(join(tmpdir(), "journl-mcp-")), "clients.json");
+  clientsFile = join(mkdtempSync(join(tmpdir(), "journl-mcp-")), "clients.json");
   writeFileSync(clientsFile, JSON.stringify({
     [LEGACY_CLIENT_ID]: { client_id: LEGACY_CLIENT_ID, client_name: "ChatGPT", redirect_uris: ["https://evil.example/cb"], token_endpoint_auth_method: "none" },
   }));
@@ -39,6 +42,8 @@ before(async () => {
     JOURNL_API_BASE_URL: journl.url,
     JOURNL_TIMEOUT_MS: "5000",
     CLIENTS_FILE: clientsFile,
+    CLIENT_ID_SECRET: "test-client-id-secret-0123456789abcdef",
+    OAUTH_RESTORED_CLIENTS: `${RESTORED_CLIENT_ID}=${RESTORED_REDIRECT}, legacy-restored-evil=https://evil.example/cb`,
   });
   console.log = () => {}; // keep test output readable (structured logs are covered separately)
   const { start } = await import("../src/server.js");
@@ -214,15 +219,75 @@ describe("OAuth redirect allowlist", () => {
     assert.equal(mixed.status, 400);
   });
 
+  // The SDK allows 20 registrations per IP per hour, so later tests reuse this client.
+  let signedClientId;
+
   test("registration accepts both documented ChatGPT callback forms", async () => {
     const res = await register({ client_name: "ChatGPT", redirect_uris: [REDIRECT, "https://chatgpt.com/connector/oauth/AbC_123-x"] });
     assert.equal(res.status, 201);
+    signedClientId = (await res.json()).client_id;
   });
 
   test("a client saved before the allowlist cannot start sign-in, and nothing redirects to it", async () => {
     const res = await fetch(authorizeUrl({ client_id: LEGACY_CLIENT_ID, redirect_uri: "https://evil.example/cb" }), { redirect: "manual" });
     assert.equal(res.status, 400);
     assert.equal(res.headers.get("location"), null);
+  });
+
+  test("registered clients survive restarts: IDs are signed and nothing is written to disk", async () => {
+    const client_id = signedClientId;
+    assert.match(client_id, /^jc1\./);
+    assert.equal(readFileSync(clientsFile, "utf8").includes("jc1."), false, "clients file is not written");
+    // The ID alone is enough for /authorize to find the client.
+    const page = await fetch(authorizeUrl({ client_id, redirect_uri: REDIRECT, resource: `${base}/mcp` }));
+    assert.equal(page.status, 200);
+    // A signed ID only allows its own redirect URIs.
+    const other = await fetch(authorizeUrl({ client_id, redirect_uri: "https://chatgpt.com/connector/oauth/Other", resource: `${base}/mcp` }), { redirect: "manual" });
+    assert.equal(other.status, 400);
+  });
+
+  test("an altered or forged client ID is unknown", async () => {
+    const [prefix, payload, sig] = signedClientId.split(".");
+    const forgedPayload = Buffer.from(JSON.stringify({ r: ["https://evil.example/cb"], m: "none" })).toString("base64url");
+    for (const id of [`${prefix}.${payload}.${sig.slice(0, -1)}${sig.at(-1) === "A" ? "B" : "A"}`, `${prefix}.${forgedPayload}.${sig}`, "jc1.x"]) {
+      const res = await fetch(authorizeUrl({ client_id: id, redirect_uri: REDIRECT }), { redirect: "manual" });
+      assert.equal(res.status, 400, id);
+      assert.equal(res.headers.get("location"), null);
+    }
+  });
+
+  test("a confidential client's derived secret is required at the token endpoint", async () => {
+    const res = await fetch(`${base}/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ client_name: "ChatGPT", redirect_uris: [REDIRECT], grant_types: ["authorization_code"], response_types: ["code"] }),
+    });
+    const { client_id, client_secret } = await res.json();
+    assert.ok(client_secret);
+    const exchange = async (secret) => {
+      const { res: login, verifier } = await submitLogin(client_id, USERS.owner.email, USERS.owner.password);
+      const code = new URL(login.headers.get("location")).searchParams.get("code");
+      return fetch(`${base}/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ grant_type: "authorization_code", code, code_verifier: verifier, client_id, client_secret: secret, redirect_uri: REDIRECT, resource: `${base}/mcp` }),
+      });
+    };
+    const wrong = await exchange("wrong");
+    assert.equal(wrong.status, 400);
+    assert.equal((await wrong.json()).error, "invalid_client");
+    assert.equal((await exchange(client_secret)).status, 200);
+  });
+
+  test("a restored client ID can sign in again, only at its ChatGPT callback", async () => {
+    const ok = await fetch(authorizeUrl({ client_id: RESTORED_CLIENT_ID, redirect_uri: RESTORED_REDIRECT, resource: `${base}/mcp` }));
+    assert.equal(ok.status, 200);
+    const wrong = await fetch(authorizeUrl({ client_id: RESTORED_CLIENT_ID, redirect_uri: REDIRECT }), { redirect: "manual" });
+    assert.equal(wrong.status, 400);
+    // A restored entry with a non-ChatGPT redirect is still refused.
+    const evil = await fetch(authorizeUrl({ client_id: "legacy-restored-evil", redirect_uri: "https://evil.example/cb" }), { redirect: "manual" });
+    assert.equal(evil.status, 400);
+    assert.equal(evil.headers.get("location"), null);
   });
 
   test("sign-in page ignores the client's self-declared name and shows the real destination", async () => {

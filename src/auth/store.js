@@ -1,14 +1,18 @@
 // OAuth state. Owns registered clients, pending logins, authorization codes and
 // access tokens. No accounting data is stored here.
 //
-// - Registered clients are persisted to a JSON file: ChatGPT registers once per
-//   connection and reuses the client, so losing it would break the connection.
+// - Registered clients need no storage. ChatGPT registers once per connection and
+//   reuses the client ID indefinitely, so the ID itself is signed and carries the
+//   client's redirect URIs and auth method; any instance can rebuild the client after
+//   a restart or redeploy. A confidential client's secret is derived from its ID.
+// - Clients saved to CLIENTS_FILE by earlier versions, and IDs listed in
+//   OAUTH_RESTORED_CLIENTS, are still accepted (read only).
 // - Pending logins, codes and tokens (which hold the user's JournL JWT) live in
 //   memory only. A restart signs users out; ChatGPT then re-runs the OAuth flow.
 
-import { createHash, randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { InvalidClientMetadataError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import { config } from "../config/index.js";
 import { clientRedirectsAllowed } from "./redirectPolicy.js";
@@ -17,6 +21,43 @@ const CLIENTS_FILE = resolve(config.clientsFile);
 
 export const newSecret = () => randomBytes(32).toString("base64url");
 const hash = (value) => createHash("sha256").update(value).digest("base64url");
+
+// --- signed client IDs: "jc1.<base64url JSON {r: redirect_uris, m: auth method}>.<mac>" ---
+
+const SIGNED_PREFIX = "jc1.";
+const MAX_CLIENT_ID_LENGTH = 4096;
+const mac = (label, value) => createHmac("sha256", config.clientIdSecret).update(`${label}:${value}`).digest("base64url");
+const safeEqual = (a, b) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+
+function signedClientId(client) {
+  const payload = Buffer.from(JSON.stringify({ r: client.redirect_uris, m: client.token_endpoint_auth_method ?? "client_secret_post" })).toString("base64url");
+  const body = SIGNED_PREFIX + payload;
+  return `${body}.${mac("id", body)}`;
+}
+
+/** Rebuilds a client from a signed ID, or undefined if the ID is not ours or was altered. */
+function clientFromSignedId(clientId) {
+  if (typeof clientId !== "string" || !clientId.startsWith(SIGNED_PREFIX) || clientId.length > MAX_CLIENT_ID_LENGTH) return undefined;
+  const dot = clientId.lastIndexOf(".");
+  const body = clientId.slice(0, dot);
+  if (!safeEqual(clientId.slice(dot + 1), mac("id", body))) return undefined;
+  let data;
+  try {
+    data = JSON.parse(Buffer.from(body.slice(SIGNED_PREFIX.length), "base64url").toString("utf8"));
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(data?.r) || typeof data?.m !== "string") return undefined;
+  const client = { client_id: clientId, redirect_uris: data.r, token_endpoint_auth_method: data.m };
+  if (data.m !== "none") Object.assign(client, { client_secret: mac("secret", clientId), client_secret_expires_at: 0 });
+  return client;
+}
+
+// --- clients from earlier versions ------------------------------------------------
+
+const restoredClients = new Map(
+  config.restoredClients.map(({ clientId, redirectUri }) => [clientId, { client_id: clientId, redirect_uris: [redirectUri], token_endpoint_auth_method: "none" }]),
+);
 
 function loadClients() {
   try {
@@ -28,29 +69,26 @@ function loadClients() {
   }
 }
 
-const clients = loadClients();
-
-function saveClients() {
-  mkdirSync(dirname(CLIENTS_FILE), { recursive: true });
-  const tmp = `${CLIENTS_FILE}.tmp`;
-  writeFileSync(tmp, JSON.stringify(Object.fromEntries(clients), null, 2));
-  renameSync(tmp, CLIENTS_FILE);
-}
+const savedClients = loadClients();
 
 export const clientsStore = {
   getClient(clientId) {
-    const client = clients.get(clientId);
-    // Clients saved before the redirect allowlist existed are treated as unknown, so
-    // /authorize answers with a plain error instead of redirecting to their URI.
+    const client = clientFromSignedId(clientId) ?? restoredClients.get(clientId) ?? savedClients.get(clientId);
+    // Clients whose redirect URIs are not ChatGPT callbacks (e.g. saved before the
+    // allowlist existed) are treated as unknown, so /authorize answers with a plain
+    // error instead of redirecting to their URI.
     return client && clientRedirectsAllowed(client) ? client : undefined;
   },
   registerClient(client) {
     if (!clientRedirectsAllowed(client)) {
       throw new InvalidClientMetadataError("redirect_uris must be ChatGPT connector callback URLs");
     }
-    clients.set(client.client_id, client);
-    saveClients();
-    return client;
+    const registered = { ...client, client_id: signedClientId(client) };
+    if (registered.token_endpoint_auth_method !== "none") {
+      registered.client_secret = mac("secret", registered.client_id);
+      registered.client_secret_expires_at = 0;
+    }
+    return registered;
   },
 };
 

@@ -1,5 +1,7 @@
 // Runtime configuration, parsed once at startup. Fails fast on bad values.
 
+import { randomBytes } from "node:crypto";
+
 function parseUrl(name, value) {
   try {
     return new URL(String(value).replace(/\/+$/, ""));
@@ -19,6 +21,15 @@ const port = positiveNumber("PORT", 3100);
 /** Public base URL ChatGPT uses to reach this server (https, or http://localhost for local testing). */
 const publicUrl = parseUrl("PUBLIC_URL", process.env.PUBLIC_URL?.trim() || `http://localhost:${port}`);
 const base = publicUrl.href.replace(/\/$/, "");
+
+/** Required outside localhost; a random per-process value is used for local runs. */
+function clientIdSecret() {
+  const value = process.env.CLIENT_ID_SECRET?.trim() ?? "";
+  if (value.length >= 32) return value;
+  if (value) throw new Error("CLIENT_ID_SECRET must be at least 32 characters");
+  if (publicUrl.hostname === "localhost" || publicUrl.hostname === "127.0.0.1") return randomBytes(32).toString("base64url");
+  throw new Error("CLIENT_ID_SECRET is required (32+ random characters, kept the same across deploys)");
+}
 
 export const config = Object.freeze({
   port,
@@ -44,8 +55,28 @@ export const config = Object.freeze({
       .map((s) => s.trim())
       .filter(Boolean),
   ),
-  /** Where registered OAuth clients (not tokens) are persisted. */
+  /** Clients saved by earlier versions (read only; new clients are not written here). */
   clientsFile: process.env.CLIENTS_FILE?.trim() || "data/clients.json",
+  /**
+   * Signs OAuth client IDs so registered clients survive restarts and redeploys without
+   * storage. Must stay the same across deploys: changing it disconnects every ChatGPT user.
+   */
+  clientIdSecret: clientIdSecret(),
+  /**
+   * Client IDs ChatGPT still holds from before signed IDs, re-admitted as public clients:
+   * comma-separated `clientId=redirectUri`. The redirect must still be a ChatGPT callback.
+   */
+  restoredClients: Object.freeze(
+    (process.env.OAUTH_RESTORED_CLIENTS ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((entry) => {
+        const at = entry.indexOf("=");
+        if (at < 1) throw new Error(`OAUTH_RESTORED_CLIENTS entry must be clientId=redirectUri, got "${entry}"`);
+        return Object.freeze({ clientId: entry.slice(0, at).trim(), redirectUri: entry.slice(at + 1).trim() });
+      }),
+  ),
 
   /** How long a user has to submit the login form after ChatGPT starts authorization. */
   pendingLoginTtlMs: 10 * 60_000,
