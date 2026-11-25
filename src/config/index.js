@@ -22,13 +22,20 @@ const port = positiveNumber("PORT", 3100);
 const publicUrl = parseUrl("PUBLIC_URL", process.env.PUBLIC_URL?.trim() || `http://localhost:${port}`);
 const base = publicUrl.href.replace(/\/$/, "");
 
-/** Required outside localhost; a random per-process value is used for local runs. */
+/**
+ * Should be set in production. Without it the server still starts, with a random
+ * per-process secret: ChatGPT connections then break on every restart (users must
+ * remove and re-add the connection), so a missing value is logged loudly.
+ */
 function clientIdSecret() {
   const value = process.env.CLIENT_ID_SECRET?.trim() ?? "";
   if (value.length >= 32) return value;
   if (value) throw new Error("CLIENT_ID_SECRET must be at least 32 characters");
-  if (publicUrl.hostname === "localhost" || publicUrl.hostname === "127.0.0.1") return randomBytes(32).toString("base64url");
-  throw new Error("CLIENT_ID_SECRET is required (32+ random characters, kept the same across deploys)");
+  const local = publicUrl.hostname === "localhost" || publicUrl.hostname === "127.0.0.1";
+  if (!local) {
+    console.error(JSON.stringify({ level: "error", event: "config_warning", message: "CLIENT_ID_SECRET is not set: ChatGPT connections will break on every restart. Set it to 32+ random characters and keep it the same across deploys." }));
+  }
+  return randomBytes(32).toString("base64url");
 }
 
 export const config = Object.freeze({
