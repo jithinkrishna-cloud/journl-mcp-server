@@ -64,9 +64,20 @@ const baseStyles = `
   a:hover { text-decoration:underline; }
 `;
 
-export function loginPage({ pendingId, clientName, error, email }) {
-  const client = escapeHtml(clientName || "ChatGPT");
-  const clientInitial = escapeHtml((clientName || "ChatGPT").trim().charAt(0).toUpperCase() || "C");
+/** Host the user returns to after signing in (always chatgpt.com in production). */
+function hostOf(uri) {
+  try {
+    return new URL(uri).host;
+  } catch {
+    return "";
+  }
+}
+
+export function loginPage({ pendingId, returnTo, error, email }) {
+  // Fixed name, not the client's self-declared client_name, which anyone can set at registration.
+  const client = "ChatGPT";
+  const clientInitial = "C";
+  const returnHost = escapeHtml(hostOf(returnTo));
 
   const canRead = [
     "Ledger names and statements",
@@ -101,6 +112,7 @@ ${baseStyles}
     background:var(--ok-soft); color:var(--ok); font-size:12.5px; font-weight:600;
   }
   .pill span { width:14px; height:14px; }
+  .dest { margin:10px 0 0; font-size:13px; color:var(--muted); }
 
   .alert {
     display:flex; gap:10px; align-items:flex-start; padding:11px 12px; margin:0 0 18px;
@@ -163,6 +175,7 @@ ${baseStyles}
       <h1>Connect ${client} to JournL</h1>
       <p class="lead">Sign in to give <strong>${client}</strong> access to your company books.</p>
       <div class="pill"><span>${icon.lock}</span>Read-only access</div>
+      ${returnHost ? `<p class="dest">After you sign in, you'll return to <strong>${returnHost}</strong></p>` : ""}
     </div>
 
     ${error ? `<div class="alert" role="alert"><span>${icon.alert}</span><div>${escapeHtml(error)}</div></div>` : ""}

@@ -1,5 +1,5 @@
 // Builds the ChatGPT plugin ZIP for the OpenAI plugin portal (Agent Plugins format):
-//   dist/plugin/{plugin.json, mcp.json, assets/logo.png, assets/icon.png}
+//   dist/plugin/{plugin.json, mcp.json, assets/logo.png, assets/icon.png, skills/<name>/...}
 //   dist/journl-plugin-<version>.zip
 //
 // Values come from plugin/plugin.env (see plugin/plugin.env.example) or the environment.
@@ -9,8 +9,8 @@
 //   npm run build:plugin
 
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -87,6 +87,38 @@ if (icon.toString("ascii", 1, 4) !== "PNG") errors.push("assets/journl-icon.png 
 if (w !== h || w < 48 || w > 4096) errors.push(`icon must be square 48..4096 px, got ${w}x${h}`);
 if (icon.length > 5 * 1024 * 1024) errors.push("icon is over 5 MiB");
 
+// Skills: plugin/skills/<name>/SKILL.md (+ agents/openai.yaml). Each needs front matter whose
+// name matches its folder and a description; placeholders such as {{MCP_URL}} are filled.
+const skillsSrc = join(root, "plugin", "skills");
+const skillFiles = []; // [relative path, filled text]
+const skillNames = existsSync(skillsSrc) ? readdirSync(skillsSrc, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name) : [];
+if (plugin.skills && !skillNames.length) errors.push("plugin.json declares skills but plugin/skills has none");
+const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walk(join(dir, d.name)) : [join(dir, d.name)]));
+for (const name of skillNames) {
+  const dir = join(skillsSrc, name);
+  if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(name) || name.length > 64) errors.push(`skill folder "${name}" must be lowercase-hyphenated, max 64 chars`);
+  if (!existsSync(join(dir, "SKILL.md"))) { errors.push(`skills/${name}/SKILL.md is missing`); continue; }
+  for (const file of walk(dir)) {
+    const rel = relative(skillsSrc, file).split(sep).join("/");
+    let text = readFileSync(file, "utf8");
+    for (const [k, v] of Object.entries(vars)) text = text.replaceAll(`{{${k}}}`, String(v ?? ""));
+    const left = text.match(/\{\{[A-Z_]+\}\}/g);
+    if (left) errors.push(`skills/${rel}: unfilled ${[...new Set(left)].join(", ")}`);
+    if (rel === `${name}/SKILL.md`) {
+      const fm = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+      const field = (f) => fm?.[1].match(new RegExp(`^${f}:\\s*(.+)$`, "m"))?.[1].trim();
+      if (!fm) errors.push(`skills/${rel}: missing front matter`);
+      else {
+        if (field("name") !== name) errors.push(`skills/${rel}: name must be "${name}"`);
+        const desc = field("description");
+        if (!desc) errors.push(`skills/${rel}: description is required`);
+        else limit(`skills/${rel} description`, desc, 1024);
+      }
+    }
+    skillFiles.push([rel, text]);
+  }
+}
+
 if (errors.length) {
   console.error("Plugin package NOT built:\n  - " + errors.join("\n  - "));
   process.exit(1);
@@ -99,12 +131,17 @@ writeFileSync(join(out, "plugin.json"), JSON.stringify(plugin, null, 2) + "\n");
 writeFileSync(join(out, "mcp.json"), JSON.stringify(mcp, null, 2) + "\n");
 copyFileSync(iconSrc, join(out, "assets", "logo.png"));
 copyFileSync(iconSrc, join(out, "assets", "icon.png"));
+for (const [rel, text] of skillFiles) {
+  const dest = join(out, "skills", ...rel.split("/"));
+  mkdirSync(dirname(dest), { recursive: true });
+  writeFileSync(dest, text);
+}
 
 // The ZIP contains the plugin root's contents (plugin.json at the top level).
 // Windows: the built-in bsdtar writes ZIPs (Git Bash's GNU tar on PATH cannot). Elsewhere: zip.
 const zipName = `journl-plugin-${vars.VERSION}.zip`;
 const zip = join(root, "dist", zipName);
-const entries = ["plugin.json", "mcp.json", "assets"];
+const entries = ["plugin.json", "mcp.json", "assets", ...(skillFiles.length ? ["skills"] : [])];
 if (process.platform === "win32") {
   const bsdtar = join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe");
   execFileSync(bsdtar, ["-a", "-c", "-f", join("..", zipName), ...entries], { cwd: out });

@@ -10,6 +10,7 @@
   },
   "homepage": "{{WEBSITE_URL}}",
   "keywords": ["accounting", "bookkeeping", "gst", "ledger", "reports", "india"],
+  "skills": "./skills/",
   "extensions": {
     "com.openai": {
       "interface": {

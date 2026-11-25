@@ -9,7 +9,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { InvalidClientMetadataError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import { config } from "../config/index.js";
+import { clientRedirectsAllowed } from "./redirectPolicy.js";
 
 const CLIENTS_FILE = resolve(config.clientsFile);
 
@@ -37,9 +39,15 @@ function saveClients() {
 
 export const clientsStore = {
   getClient(clientId) {
-    return clients.get(clientId);
+    const client = clients.get(clientId);
+    // Clients saved before the redirect allowlist existed are treated as unknown, so
+    // /authorize answers with a plain error instead of redirecting to their URI.
+    return client && clientRedirectsAllowed(client) ? client : undefined;
   },
   registerClient(client) {
+    if (!clientRedirectsAllowed(client)) {
+      throw new InvalidClientMetadataError("redirect_uris must be ChatGPT connector callback URLs");
+    }
     clients.set(client.client_id, client);
     saveClients();
     return client;

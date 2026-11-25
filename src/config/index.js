@@ -34,6 +34,16 @@ export const config = Object.freeze({
   privacyPolicyUrl: process.env.PRIVACY_POLICY_URL?.trim() || "",
   /** Domain-verification token from the OpenAI plugin portal (served at /.well-known/openai-apps-challenge). */
   openaiAppsChallenge: process.env.OPENAI_APPS_CHALLENGE?.trim() || "",
+  /**
+   * Extra exact OAuth redirect URIs allowed besides ChatGPT's (comma-separated), for
+   * testing tools such as MCP Inspector. Leave empty in production.
+   */
+  extraRedirectUris: Object.freeze(
+    (process.env.OAUTH_EXTRA_REDIRECT_URIS ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  ),
   /** Where registered OAuth clients (not tokens) are persisted. */
   clientsFile: process.env.CLIENTS_FILE?.trim() || "data/clients.json",
 

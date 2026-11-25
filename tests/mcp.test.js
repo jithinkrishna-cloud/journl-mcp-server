@@ -5,7 +5,7 @@ import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:net";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -22,18 +22,23 @@ const freePort = () =>
 
 let journl, mcpServer, base;
 const REDIRECT = "https://chatgpt.com/connector_platform_oauth_redirect";
+const LEGACY_CLIENT_ID = "legacy-evil-client"; // saved before the redirect allowlist existed
 
 before(async () => {
   journl = await startMockJournl();
   const port = await freePort();
   base = `http://localhost:${port}`;
+  const clientsFile = join(mkdtempSync(join(tmpdir(), "journl-mcp-")), "clients.json");
+  writeFileSync(clientsFile, JSON.stringify({
+    [LEGACY_CLIENT_ID]: { client_id: LEGACY_CLIENT_ID, client_name: "ChatGPT", redirect_uris: ["https://evil.example/cb"], token_endpoint_auth_method: "none" },
+  }));
   // Config is read at import time, so set the environment first.
   Object.assign(process.env, {
     PORT: String(port),
     PUBLIC_URL: base,
     JOURNL_API_BASE_URL: journl.url,
     JOURNL_TIMEOUT_MS: "5000",
-    CLIENTS_FILE: join(mkdtempSync(join(tmpdir(), "journl-mcp-")), "clients.json"),
+    CLIENTS_FILE: clientsFile,
   });
   console.log = () => {}; // keep test output readable (structured logs are covered separately)
   const { start } = await import("../src/server.js");
@@ -172,6 +177,60 @@ describe("authentication", () => {
     const { res } = await submitLogin(await registerClient(), USERS.multi.email, USERS.multi.password);
     assert.equal(res.status, 401);
     assert.ok(!journl.state.requests.some((r) => r.path.startsWith("/auth/login-")), "passwordless routes are never called");
+  });
+});
+
+describe("OAuth redirect allowlist", () => {
+  const register = (body) =>
+    fetch(`${base}/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token_endpoint_auth_method: "none", grant_types: ["authorization_code"], response_types: ["code"], ...body }),
+    });
+  const authorizeUrl = (params) => {
+    const url = new URL(`${base}/authorize`);
+    const all = { response_type: "code", code_challenge: "x".repeat(43), code_challenge_method: "S256", state: "st", ...params };
+    for (const [k, v] of Object.entries(all)) url.searchParams.set(k, v);
+    return url;
+  };
+
+  test("registration refuses redirect URIs that are not ChatGPT callbacks", async () => {
+    for (const uri of [
+      "https://evil.example/cb",
+      "https://chatgpt.com.evil.example/connector_platform_oauth_redirect",
+      "https://chatgpt.com/somewhere-else",
+      "https://chatgpt.com/connector/oauth/abc/../../evil",
+      "https://chatgpt.com:8443/connector_platform_oauth_redirect",
+      "http://chatgpt.com/connector_platform_oauth_redirect",
+      "https://chatgpt.com/connector_platform_oauth_redirect?next=https://evil.example",
+      "https://user@chatgpt.com/connector_platform_oauth_redirect",
+    ]) {
+      const res = await register({ client_name: "ChatGPT", redirect_uris: [uri] });
+      assert.equal(res.status, 400, uri);
+      assert.equal((await res.json()).error, "invalid_client_metadata", uri);
+    }
+    // One bad URI among good ones is still refused.
+    const mixed = await register({ client_name: "ChatGPT", redirect_uris: [REDIRECT, "https://evil.example/cb"] });
+    assert.equal(mixed.status, 400);
+  });
+
+  test("registration accepts both documented ChatGPT callback forms", async () => {
+    const res = await register({ client_name: "ChatGPT", redirect_uris: [REDIRECT, "https://chatgpt.com/connector/oauth/AbC_123-x"] });
+    assert.equal(res.status, 201);
+  });
+
+  test("a client saved before the allowlist cannot start sign-in, and nothing redirects to it", async () => {
+    const res = await fetch(authorizeUrl({ client_id: LEGACY_CLIENT_ID, redirect_uri: "https://evil.example/cb" }), { redirect: "manual" });
+    assert.equal(res.status, 400);
+    assert.equal(res.headers.get("location"), null);
+  });
+
+  test("sign-in page ignores the client's self-declared name and shows the real destination", async () => {
+    const { client_id } = await (await register({ client_name: "Your Bank <b>Security</b>", redirect_uris: [REDIRECT] })).json();
+    const page = await (await fetch(authorizeUrl({ client_id, redirect_uri: REDIRECT, resource: `${base}/mcp` }))).text();
+    assert.ok(!page.includes("Your Bank"), "client_name is not shown");
+    assert.match(page, /Connect ChatGPT to JournL/);
+    assert.match(page, /return to <strong>chatgpt\.com<\/strong>/);
   });
 });
 

@@ -55,6 +55,7 @@ Requires Node.js 22.9+.
 | `JOURNL_TIMEOUT_MS` | Timeout per JournL call | `30000` |
 | `PRIVACY_POLICY_URL` | Linked on the sign-in page (required for public listing) | – |
 | `CLIENTS_FILE` | Registered OAuth clients (no tokens or accounting data) | `data/clients.json` |
+| `OAUTH_EXTRA_REDIRECT_URIS` | Extra exact OAuth redirect URIs (comma-separated) for local testing; ChatGPT callbacks are always allowed. Leave empty in production | – |
 | `LOGIN_FAILURE_LIMIT` | Failed sign-ins per IP per 15 min | `10` |
 | `MCP_REQUESTS_PER_MINUTE` | MCP requests per user per minute | `120` |
 | `HTTP_REQUEST_TIMEOUT_MS` | Incoming request timeout | `60000` |

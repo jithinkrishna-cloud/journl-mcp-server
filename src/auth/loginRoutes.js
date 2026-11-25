@@ -14,6 +14,7 @@ import { logEvent, userRef } from "../utils/log.js";
 import { errorPage, loginPage } from "./loginPage.js";
 import { sendHtml } from "./html.js";
 import { getPendingLogin, putAuthCode } from "./store.js";
+import { isAllowedRedirectUri } from "./redirectPolicy.js";
 
 const failures = createRateLimiter({ limit: config.loginFailureLimit, windowMs: config.loginFailureWindowMs });
 
@@ -21,6 +22,11 @@ const failures = createRateLimiter({ limit: config.loginFailureLimit, windowMs: 
 async function attemptLogin(pending, email, password, ip) {
   if (failures.isLimited(ip)) return { status: 429, error: "Too many failed attempts. Please wait a few minutes and try again." };
   if (!email || !password || email.length > 254 || password.length > 256) return { status: 400, error: "Enter your email and password." };
+  // Last check before a code is minted: never send one anywhere but ChatGPT.
+  if (!isAllowedRedirectUri(pending.params.redirectUri)) {
+    logEvent("login_blocked_redirect");
+    return { status: 400, error: "This sign-in request did not come from ChatGPT. Return to ChatGPT and connect JournL again." };
+  }
 
   let result;
   try {
@@ -76,5 +82,5 @@ loginRouter.post("/login", express.urlencoded({ extended: false, limit: "10kb" }
   }
 
   if (outcome.redirect) return res.set("Cache-Control", "no-store").redirect(302, outcome.redirect);
-  return sendHtml(res, outcome.status, loginPage({ pendingId, clientName: pending.clientName, error: outcome.error, email }));
+  return sendHtml(res, outcome.status, loginPage({ pendingId, returnTo: pending.params.redirectUri, error: outcome.error, email }));
 });

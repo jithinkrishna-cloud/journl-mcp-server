@@ -14,8 +14,10 @@ OpenAI API inside JournL.
 
 ## Shape (per OpenAI "Choose a plugin shape")
 
-**MCP server only** for v1 — no custom UI, no skills. Add a skill later
-(e.g. "month-end review" workflow) and UI only if a use case needs it.
+**MCP server + skills** — no custom UI. Skills live in `plugin/skills/` and are
+packaged by `npm run build:plugin`: `journl-month-end-review`,
+`journl-receivables-followup`, `journl-gst-period-summary`. Each declares the
+`journl` MCP server in `agents/openai.yaml`. Add UI only if a use case needs it.
 
 ```
 ChatGPT ──OAuth 2.1 + PKCE──► JournL MCP auth (in this server)

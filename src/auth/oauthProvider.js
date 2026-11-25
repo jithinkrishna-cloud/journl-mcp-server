@@ -18,13 +18,14 @@ export const oauthProvider = {
     if (params.resource && !sameResource(params.resource, config.mcpResourceUrl)) {
       throw new InvalidRequestError(`Unknown resource ${params.resource}`);
     }
+    // The client's self-chosen client_name is never shown: the page names ChatGPT and
+    // the real destination host, which the redirect allowlist guarantees.
     const pendingId = putPendingLogin({
       clientId: client.client_id,
-      clientName: client.client_name,
       params,
       expiresAtMs: Date.now() + config.pendingLoginTtlMs,
     });
-    sendHtml(res, 200, loginPage({ pendingId, clientName: client.client_name }));
+    sendHtml(res, 200, loginPage({ pendingId, returnTo: params.redirectUri }));
   },
 
   async challengeForAuthorizationCode(client, code) {
