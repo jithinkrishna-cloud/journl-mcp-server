@@ -410,10 +410,12 @@ describe("tools through an MCP client", () => {
   });
 
   test("JournL API failures return a safe message", async () => {
-    journl.state.failNext = { status: 500, body: { success: false, message: "Something went wrong" } };
+    // Some JournL handlers put raw database errors in `message`; they must never reach ChatGPT.
+    journl.state.failNext = { status: 500, body: { success: false, message: "ER_PARSE_ERROR: You have an error in your SQL syntax near 'x' at line 1" } };
     const r = await owner.callTool({ name: "get_cash_flow", arguments: period });
     assert.equal(r.isError, true);
-    assert.equal(r.content[0].text, "JournL: Something went wrong");
+    assert.equal(r.content[0].text, "JournL had a problem completing this request. Please try again.");
+    assert.doesNotMatch(r.content[0].text, /SQL|ER_/);
   });
 
   test("no JournL JWT, access token or password appears in any tool response", async () => {

@@ -115,7 +115,7 @@ export function reportTool(server, { name, title, description, inputSchema, path
           if (session) revokeSession(session);
           return errorResult(err.message);
         }
-        if (err instanceof JournlApiError) return errorResult(`JournL: ${err.message}`);
+        if (err instanceof JournlApiError) return errorResult(err.message.startsWith("JournL ") ? err.message : `JournL: ${err.message}`);
         logEvent("tool_failure", { tool: name, reason: err?.name ?? "Error" });
         return errorResult("Something went wrong while reading JournL. Please try again.");
       }

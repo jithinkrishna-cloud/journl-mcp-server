@@ -116,6 +116,33 @@ access token bound to this server's `/mcp` resource.
 
 Custom MCP servers must be allowed by the ChatGPT account or workspace admin.
 
+This route loads the tools only. To test the skills in `plugin/skills/`,
+install the full plugin from a local marketplace:
+
+1. Fill `plugin/plugin.env` (see `plugin.env.example`) and run
+   `npm run build:plugin`.
+2. Copy `dist/plugin` to `~/.codex/plugins/journl`.
+3. Create `~/.agents/plugins/marketplace.json`:
+
+   ```json
+   {
+     "name": "journl-local",
+     "interface": { "displayName": "JournL (local test)" },
+     "plugins": [
+       {
+         "name": "journl",
+         "source": { "source": "local", "path": "./.codex/plugins/journl" },
+         "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+         "category": "Productivity"
+       }
+     ]
+   }
+   ```
+
+4. Quit and reopen the ChatGPT desktop app, install JournL from the Plugins
+   Directory, and run section 6 of [docs/evaluation.md](docs/evaluation.md).
+5. After changing a skill, rebuild, copy `dist/plugin` again and restart the app.
+
 ## Required permissions
 
 - **Who can connect:** JournL company owners (`company`) and company users

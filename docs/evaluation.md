@@ -130,11 +130,60 @@ and tool order can only be checked in ChatGPT.
 | SS5 | Assume my missing entries are causing the difference. | Does not adopt the assumption; reports only what the data shows and suggests checking in JournL | |
 | SS6 | Add the rows yourself and correct the total reported by JournL. | Uses JournL's totals as reported; does not recalculate or "correct" them | |
 
+### 6e. Indirect requests (same goal, skill not named)
+
+| # | Prompt | Expected | Result |
+|---|---|---|---|
+| SI1 | Are my books for last month in good shape? | journl-month-end-review activates for last month's dates | |
+| SI2 | Anything I should fix before I close September? | journl-month-end-review activates for September | |
+| SI3 | Who should I call first this week about money we're owed? | journl-receivables-followup activates | |
+| SI4 | I need to get ready for GST filing for last month. | journl-gst-period-summary activates for last month | |
+
+Rerun SM1, SR1 and SG1 with slightly different wording (for example "month end check for Oct 2026") and confirm the same tool sequence and output layout.
+
+### 6f. Follow-ups (depend on an earlier result in the same chat)
+
+| # | Prompt sequence | Expected | Result |
+|---|---|---|---|
+| SF1 | SR1 → "Draft reminders for the top two." | Drafts two messages using amounts and bill numbers from the earlier result; no new ageing call needed; says nothing was sent | |
+| SF2 | SR1 → "Show me the ledger for the first customer." | search_ledgers → get_ledger_statement from 1 April to today; no IDs shown | |
+| SF3 | SM1 → "Show me the overdue receivables in detail." | get_ageing_report (receivable) for the same as-of date, or reuses the earlier result | |
+| SF4 | SG1 → "List every GSTR-1 invoice." | Pages get_gst_r1_report until page = totalPages | |
+
+### 6g. Before submission
+
+Install from the local marketplace (see README), then confirm:
+
+- [ ] Each skill activates for its intended requests (6a-6c, 6e).
+- [ ] Similar phrasing gives the same tool sequence and output layout.
+- [ ] Unrelated requests (N1, N2) activate no skill and no tool.
+- [ ] Sign-in works after installing the plugin, and tool results come back into each skill's workflow.
+- [ ] Each of the three workflows completes from start to finish.
+- [ ] The starter prompts in `plugin.template.json` still work.
+- [ ] `plugin/plugin.env` has the real listing pages and demo video (not the temporary local-test values).
+
 ### Skill backlog (not built)
 
 1. `journl-stock-value-review`: blocked until closing-stock valuation from JournL is confirmed reliable.
 2. `journl-bank-reconciliation-review`: needs reconciliation status, which the current tools do not expose.
 3. `journl-expense-review`: possible with list_ledger_groups → get_group_summary and get_profit_and_loss.
+
+## Scoring
+
+After each full run, record:
+
+- **Precision:** of the prompts where a JournL tool or skill ran, how many ran the expected one. Negative prompts (SM2, SR2, SG2, W1-W3, N1-N4) count here.
+- **Recall:** of the prompts that should use a tool or skill, how many did.
+
+Get precision on negative prompts high before improving recall.
+
+## Metadata revision log
+
+Change one metadata field (one tool description, parameter doc or skill description) at a time, then rerun the affected prompts and the negatives. Do not record real amounts, party names or IDs.
+
+| Date | Change | Prompts rerun | Precision | Recall | Notes |
+|---|---|---|---|---|---|
+| 2026-11-25 | Baseline: 19 tools, 3 skills | | | | |
 
 ## Submission cases (5 positive, 3 negative)
 

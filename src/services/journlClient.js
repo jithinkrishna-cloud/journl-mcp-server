@@ -55,7 +55,11 @@ async function request(method, path, { query, body, token } = {}) {
 
   if (res.status === 401) throw new JournlAuthError(payload?.code === "ACCOUNT_DELETED" ? payload.message : undefined);
   if (!res.ok || payload?.success === false || payload === null) {
-    const message = typeof payload?.message === "string" && payload.message ? payload.message : `request failed (HTTP ${res.status})`;
+    // Server errors can carry internal details (some JournL handlers return raw database
+    // error text), so only refusals (4xx and success:false) pass JournL's own message on.
+    const own = typeof payload?.message === "string" ? payload.message.trim() : "";
+    const message =
+      res.status >= 500 || !own ? "JournL had a problem completing this request. Please try again." : own.slice(0, 300);
     throw new JournlApiError(message, res.status);
   }
   return payload;
