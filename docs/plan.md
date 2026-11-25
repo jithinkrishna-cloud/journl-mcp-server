@@ -16,8 +16,22 @@ OpenAI API inside JournL.
 
 **MCP server + skills** — no custom UI. Skills live in `plugin/skills/` and are
 packaged by `npm run build:plugin`: `journl-month-end-review`,
-`journl-receivables-followup`, `journl-gst-period-summary`. Each declares the
+`journl-receivables-followup`, `journl-gst-period-summary`,
+`journl-bank-reconciliation`, `journl-party-reconciliation`. Each declares the
 `journl` MCP server in `agents/openai.yaml`. Add UI only if a use case needs it.
+
+### Reconciliation workflows (decided 2026-11-25)
+
+| Workflow | Data today | Decision |
+|---|---|---|
+| Bank reconciliation | Bank ledger statement; bank statement uploaded by the user | **Skill** `journl-bank-reconciliation` (matching and BRS in the chat; cannot mark reconciled) |
+| Party ledger reconciliation | Party ledger statement; party's statement uploaded by the user | **Skill** `journl-party-reconciliation` |
+| GSTR-2B vs purchase register | `get_gst_r2b_report` + `search_vouchers` (Purchase), both paged at 50 | **Needs a server tool** that pages and matches by supplier invoice no., GSTIN and amount; too many rows to match reliably in the chat |
+| GSTR-1 vs sales register | `get_gst_r1_report` + `search_vouchers` (Sales); B2CS is summarised, not per invoice | **Needs a server tool**; B2CS compared as totals by rate and place of supply |
+| GSTR-3B summary | No 3B data: no ITC eligibility, reversals or cash/credit ledger balances | **Not supported.** `journl-gst-period-summary` covers the R1 and 2B totals side by side |
+
+The upload-based skills depend on ChatGPT reading files the user uploads while
+the plugin is active; confirm this in the local install before relying on them.
 
 ```
 ChatGPT ──OAuth 2.1 + PKCE──► JournL MCP auth (in this server)

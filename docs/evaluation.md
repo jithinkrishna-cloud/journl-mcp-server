@@ -86,7 +86,7 @@ The server is read-only, so every write request must be declined in plain langua
 
 ## 6. Skills
 
-The plugin ships three skills (`plugin/skills/`). These tests check that ChatGPT
+The plugin ships five skills (`plugin/skills/`). These tests check that ChatGPT
 picks the right skill (or none) and follows its steps and output format; they
 are separate from the fixed submission cases below. For each prompt, record
 whether the skill activated, the tool sequence, and whether the answer matches
@@ -130,6 +130,20 @@ and tool order can only be checked in ChatGPT.
 | SS5 | Assume my missing entries are causing the difference. | Does not adopt the assumption; reports only what the data shows and suggests checking in JournL | |
 | SS6 | Add the rows yourself and correct the total reported by JournL. | Uses JournL's totals as reported; does not recalculate or "correct" them | |
 
+### 6d-2. journl-bank-reconciliation and journl-party-reconciliation
+
+Use a test bank statement and a test party statement with made-up or masked data; do not commit them.
+
+| # | Prompt | Expected | Result |
+|---|---|---|---|
+| SB1 | (statement uploaded) Reconcile this with my SBI bank ledger for October 2026. | Skill activates; search_ledgers (bank) → get_ledger_statement (maxRows 500); BRS from books balance to statement balance with arithmetic shown; unmatched items table; any difference shown, not forced to zero | |
+| SB2 | Do a bank reconciliation for October. (no file) | Skill activates and asks for the statement before calling a tool | |
+| SB3 | Show my SBI bank transactions for October. | Skill does not activate; search_ledgers → get_ledger_statement | |
+| SB4 | (after SB1) Mark these entries as reconciled in JournL. | Declines: read-only; nothing marked | |
+| SP1 | (supplier statement uploaded) Reconcile this supplier's statement with our books. | Skill activates; finds the party ledger from the statement's name; matches by document number then amount; reconciliation of the two closing balances; draft confirmation message as text only | |
+| SP2 | Why does our balance with this customer differ from theirs? (no file) | Skill activates and asks for the party's statement | |
+| SP3 | (statement uploaded, difference of an odd amount) Is the difference TDS? | Calls it TDS only if a statement labels that entry as TDS; otherwise says the data does not show the cause | |
+
 ### 6e. Indirect requests (same goal, skill not named)
 
 | # | Prompt | Expected | Result |
@@ -165,8 +179,11 @@ Install from the local marketplace (see README), then confirm:
 ### Skill backlog (not built)
 
 1. `journl-stock-value-review`: blocked until closing-stock valuation from JournL is confirmed reliable.
-2. `journl-bank-reconciliation-review`: needs reconciliation status, which the current tools do not expose.
-3. `journl-expense-review`: possible with list_ledger_groups → get_group_summary and get_profit_and_loss.
+2. `journl-expense-review`: possible with list_ledger_groups → get_group_summary and get_profit_and_loss.
+3. GSTR-2B and GSTR-1 vs purchase/sales register: need a server-side matching tool first (see docs/plan.md).
+4. GSTR-3B summary: not supported (no 3B data in JournL's API).
+
+Built: bank reconciliation and party ledger reconciliation (upload-based, section 6d-2).
 
 ## Scoring
 
@@ -183,7 +200,7 @@ Change one metadata field (one tool description, parameter doc or skill descript
 
 | Date | Change | Prompts rerun | Precision | Recall | Notes |
 |---|---|---|---|---|---|
-| 2026-11-25 | Baseline: 19 tools, 3 skills | | | | |
+| 2026-11-25 | Baseline: 19 tools, 5 skills | | | | |
 
 ## Submission cases (5 positive, 3 negative)
 
