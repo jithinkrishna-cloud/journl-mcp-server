@@ -1,6 +1,6 @@
 // JournL MCP server: an Express adapter between ChatGPT and JournL's existing API.
 //
-//   POST /mcp                 read-only JournL tools (streamable HTTP, OAuth bearer required)
+//   POST /mcp                 JournL tools, read-only unless ENABLE_WRITE_TOOLS=true (streamable HTTP, OAuth bearer required)
 //   /.well-known/*, /authorize, /token, /register, /revoke   OAuth 2.1 (via the MCP SDK)
 //   POST /login               JournL sign-in form submission
 //   GET  /health              liveness check
@@ -18,10 +18,18 @@ import { rateLimitRequests } from "./middleware/rateLimit.js";
 import { logEvent, requestLog } from "./utils/log.js";
 import { registerTools } from "./tools/index.js";
 
+// What ChatGPT is told it can change. Must match the tools actually registered.
+const ACCESS = config.enableWriteTools
+  ? "Access to the signed-in user's JournL company books: read reports, and create sales and purchase invoices. " +
+    "To create an invoice, find the party with search_ledgers and the items with get_closing_stock, call create_sales_invoice or create_purchase_invoice without confirm to get a preview, " +
+    "show the preview to the user, and call again with confirm true only after the user agrees. Existing entries cannot be edited or deleted. "
+  : "Read-only access to the signed-in user's JournL company books. This server cannot create, edit or delete entries. ";
+
 const INSTRUCTIONS =
-  "Read-only access to the signed-in user's JournL company books. Dates are YYYY-MM-DD; Indian financial years run 1 April to 31 March. " +
+  ACCESS +
+  "Dates are YYYY-MM-DD; Indian financial years run 1 April to 31 March. " +
   "Get IDs first: search_ledgers before get_ledger_statement, list_ledger_groups before get_group_summary, search_vouchers before get_voucher, get_closing_stock before get_stock_item_statement. Prefer totals the tools return over adding rows. " +
-  "Amounts are in the company currency. This server cannot create, edit or delete entries. " +
+  "Amounts are in the company currency. " +
   "Answer in plain business language. Never mention tool names, API endpoints, internal IDs (profile, ledger, group, voucher or stock IDs), " +
   "access tokens, passwords or how the data was retrieved, and do not add statements about what was or was not accessed. " +
   "Use IDs only to call the next tool; refer to ledgers, groups, vouchers and stock items by their names or numbers.";

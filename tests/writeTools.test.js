@@ -109,6 +109,13 @@ describe("invoice write tools", () => {
     [owner, staff, clerk] = await Promise.all([signIn(USERS.owner), signIn(USERS.staff), signIn(USERS.clerk)]);
   });
 
+  test("the server tells ChatGPT it can create invoices, not that it is read-only", () => {
+    const instructions = owner.getInstructions();
+    assert.match(instructions, /create sales and purchase invoices/);
+    assert.match(instructions, /confirm true only after the user agrees/);
+    assert.doesNotMatch(instructions, /Read-only|cannot create/);
+  });
+
   test("are listed as write tools that take no company ID", async () => {
     const { tools } = await owner.listTools();
     for (const name of ["create_sales_invoice", "create_purchase_invoice"]) {

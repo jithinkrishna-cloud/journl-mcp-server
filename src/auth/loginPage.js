@@ -78,7 +78,11 @@ ${baseStyles}
 <main>
   <header>
     <h1>Connect ${client} to JournL</h1>
-    <p class="muted">Read-only access to your company's reports. ${client} cannot create, change or delete anything.</p>
+    <p class="muted">${
+      config.enableWriteTools
+        ? `Access to your company's reports. ${client} can also create sales and purchase invoices, after you confirm each one; it cannot change or delete anything.`
+        : `Read-only access to your company's reports. ${client} cannot create, change or delete anything.`
+    }</p>
   </header>
 
   ${error ? `<div class="alert" role="alert">${escapeHtml(error)}</div>` : ""}
