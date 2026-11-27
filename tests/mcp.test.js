@@ -119,6 +119,26 @@ const period = { startDate: "2025-04-01", endDate: "2025-04-30" };
 
 // --- tests ---------------------------------------------------------------------
 
+describe("landing page", () => {
+  test("GET / serves a public page with the connector URL and no scripts", async () => {
+    const res = await fetch(`${base}/`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type"), /text\/html/);
+    assert.match(res.headers.get("content-security-policy"), /default-src 'none'/);
+    const html = await res.text();
+    assert.ok(html.includes(`${base}/mcp`));
+    assert.match(html, /Read-only/);
+    assert.doesNotMatch(html, /<script|invoices/i);
+    for (const name of ["1-plugins.png", "2-add-menu.png", "3-add-server.png"]) {
+      assert.ok(html.includes(`src="/steps/${name}"`), name);
+      const img = await fetch(`${base}/steps/${name}`);
+      assert.equal(img.status, 200, name);
+      assert.equal(img.headers.get("content-type"), "image/png");
+    }
+    assert.equal((await fetch(`${base}/steps/missing.png`)).status, 404);
+  });
+});
+
 describe("authentication", () => {
   test("MCP endpoint rejects requests without a token and points to OAuth metadata", async () => {
     const res = await fetch(`${base}/mcp`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });

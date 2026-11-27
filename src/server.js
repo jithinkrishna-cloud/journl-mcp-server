@@ -4,6 +4,7 @@
 //   /.well-known/*, /authorize, /token, /register, /revoke   OAuth 2.1 (via the MCP SDK)
 //   POST /login               JournL sign-in form submission
 //   GET  /health              liveness check
+//   GET  /                    public landing page
 
 import { fileURLToPath, pathToFileURL } from "node:url";
 import express from "express";
@@ -17,6 +18,7 @@ import { loginRouter } from "./auth/loginRoutes.js";
 import { rateLimitRequests } from "./middleware/rateLimit.js";
 import { logEvent, requestLog } from "./utils/log.js";
 import { registerTools } from "./tools/index.js";
+import { landingPage } from "./pages/landingPage.js";
 
 // What ChatGPT is told it can change. Must match the tools actually registered.
 const ACCESS = config.enableWriteTools
@@ -34,8 +36,11 @@ const INSTRUCTIONS =
   "access tokens, passwords or how the data was retrieved, and do not add statements about what was or was not accessed. " +
   "Use IDs only to call the next tool; refer to ledgers, groups, vouchers and stock items by their names or numbers.";
 
-const ICON_FILE = fileURLToPath(new URL("../assets/journl-icon.png", import.meta.url));
-const ICON_URL = new URL("icon.png", config.issuerUrl.href.replace(/\/?$/, "/")).href;
+const LANDING_HTML = landingPage();
+
+const ICON_FILE =fileURLToPath(new URL("../assets/journl-icon.png", import.meta.url));
+const STEPS_DIR = fileURLToPath(new URL("../assets/steps", import.meta.url));
+const ICON_URL =new URL("icon.png", config.issuerUrl.href.replace(/\/?$/, "/")).href;
 
 // Server identity, including the icon clients such as ChatGPT show next to the plugin name.
 const SERVER_INFO = Object.freeze({
@@ -58,6 +63,19 @@ app.use(requestLog);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
+// Public landing page. Same locked-down headers as the sign-in page, plus the server's own icon.
+app.get("/", (_req, res) =>
+  res
+    .set({
+      "Cache-Control": "public, max-age=300",
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; frame-ancestors 'none'",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+    })
+    .type("html")
+    .send(LANDING_HTML),
+);
+
 // OpenAI plugin portal domain verification: the exact token as plain text, nothing else.
 app.get("/.well-known/openai-apps-challenge", (_req, res) => {
   if (!config.openaiAppsChallenge) return res.status(404).type("text/plain").send("Not configured");
@@ -66,6 +84,8 @@ app.get("/.well-known/openai-apps-challenge", (_req, res) => {
 app.get(["/icon.png", "/favicon.ico"], (_req, res) =>
   res.set("Cache-Control", "public, max-age=86400").type("png").sendFile(ICON_FILE),
 );
+// Screenshots for the landing page's connect steps.
+app.use("/steps", express.static(STEPS_DIR, { index: false, maxAge: "1d", fallthrough: false }));
 
 app.use(
   mcpAuthRouter({

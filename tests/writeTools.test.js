@@ -102,6 +102,16 @@ describe("invoice pricing", () => {
   });
 });
 
+describe("landing page with write tools", () => {
+  test("GET / explains how to create invoices", async () => {
+    const html = await (await fetch(`${base}/`)).text();
+    assert.match(html, /Create invoices/);
+    assert.match(html, /Create a sales invoice for/);
+    assert.match(html, /Create purchase invoices/);
+    assert.doesNotMatch(html, /Read-only/);
+  });
+});
+
 describe("invoice write tools", () => {
   let owner, staff, clerk;
 
