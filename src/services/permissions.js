@@ -15,6 +15,9 @@ export const FEATURE = Object.freeze({
   CLOSING_STOCK: 28,
   GROUP_SUMMARY: 38,
   CASH_FLOW: 48,
+  // Permission IDs, not the plan-quota IDs that JournL's featureLimitMiddleware uses (5 / 14).
+  SALES: 14,
+  PURCHASE: 16,
 });
 
 /**
@@ -33,4 +36,18 @@ export function denyReason(session, rule) {
   if (rule === OWNER_ONLY) return "This report is currently available only to the company owner through ChatGPT.";
   const allowed = session.permissions.some((p) => rule.includes(Number(p.featureId)) && p.view === true);
   return allowed ? null : "Your JournL role does not have view permission for this report. Ask your company admin for access.";
+}
+
+/**
+ * JournL's create-voucher route checks no permission at all, so this server requires
+ * the feature's `add` right for company users before creating anything.
+ *
+ * @param {object} session  signed-in session
+ * @param {number} featureId  feature the new record belongs to (FEATURE.SALES, FEATURE.PURCHASE)
+ * @returns {string | null} a reason when access is denied, otherwise null
+ */
+export function denyAddReason(session, featureId) {
+  if (session.role === "company") return null;
+  const allowed = session.permissions.some((p) => Number(p.featureId) === featureId && p.add === true);
+  return allowed ? null : "Your JournL role does not have permission to add these invoices. Ask your company admin for access.";
 }

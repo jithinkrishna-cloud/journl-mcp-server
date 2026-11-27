@@ -1,5 +1,8 @@
-// Registers every read-only JournL tool. Write tools are out of scope.
+// Registers every read-only JournL tool. The invoice-creating tools are registered only
+// when ENABLE_WRITE_TOOLS=true (for testing against a test company).
 
+import { config } from "../config/index.js";
+import { registerInvoiceTools } from "./invoices/index.js";
 import { registerCompanyTools } from "./companies/index.js";
 import { registerLedgerTools } from "./ledgers/index.js";
 import { registerReportTools } from "./reports/index.js";
@@ -18,4 +21,5 @@ export function registerTools(server) {
   registerGstTools(server);
   registerInventoryTools(server);
   registerCustomerTools(server);
+  if (config.enableWriteTools) registerInvoiceTools(server);
 }

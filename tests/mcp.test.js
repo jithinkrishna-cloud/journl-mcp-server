@@ -311,6 +311,7 @@ describe("tools through an MCP client", () => {
   test("lists all read-only tools with explicit annotations", async () => {
     const { tools } = await owner.listTools();
     assert.equal(tools.length, 19);
+    assert.ok(!tools.some((t) => t.name.startsWith("create_")), "write tools stay off unless ENABLE_WRITE_TOOLS=true");
     for (const t of tools) {
       assert.equal(t.annotations.readOnlyHint, true, t.name);
       assert.equal(t.annotations.destructiveHint, false, t.name);

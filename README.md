@@ -59,6 +59,7 @@ Requires Node.js 22.9+.
 | `LOGIN_FAILURE_LIMIT` | Failed sign-ins per IP per 15 min | `10` |
 | `MCP_REQUESTS_PER_MINUTE` | MCP requests per user per minute | `120` |
 | `HTTP_REQUEST_TIMEOUT_MS` | Incoming request timeout | `60000` |
+| `ENABLE_WRITE_TOOLS` | `true` adds the invoice-creating tools (see below). Testing against a test company only; leave unset in production | – |
 
 No JournL database credentials or JWT secret are needed or used.
 
@@ -203,6 +204,31 @@ All tools are read-only (`readOnlyHint: true`, `destructiveHint: false`,
 
 Optional on most reports: `branchId`, `allBranches` (owners only), and `maxRows`
 (default 50, max 500) for long lists.
+
+### Write tools (testing only)
+
+With `ENABLE_WRITE_TOOLS=true` two more tools are registered. They create real
+vouchers through JournL's `POST /transaction/create-voucher`, so point
+`JOURNL_API_BASE_URL` at a test company.
+
+| Tool | Example prompt | Example arguments |
+|---|---|---|
+| `create_sales_invoice` | "Bill Acme 2 widgets at 50" | `{ "partyLedgerId": 30, "date": "2026-11-27", "items": [{ "stockId": 4, "quantity": 2, "rate": 50 }] }` |
+| `create_purchase_invoice` | "Record bill SB-778 from Steel Suppliers" | `{ "partyLedgerId": 40, "date": "2026-11-27", "refNo": "SB-778", "items": [{ "stockId": 4, "quantity": 10, "rate": 40 }] }` |
+
+- Without `"confirm": true` the tool only returns a preview (lines, GST, totals,
+  next invoice number) and saves nothing. ChatGPT is told to show the preview and
+  call again with `confirm: true` once the user agrees.
+- JournL's create route checks no permission, takes `createdBy` from the request
+  and does not check that the voucher balances. So this server checks the
+  company user's **add** right (Sales 14 / Purchase 16), sets `createdBy` from
+  the session, and computes every line, the GST split and the totals itself from
+  each stock item's GST rate. CGST+SGST or IGST follows the party's state against
+  the company's state, by the same rules as JournL's bulk import.
+- JournL itself chooses the Sales/Purchase and GST ledgers and blocks negative stock.
+- The party must be a customer (Sundry Debtors) for sales and a supplier (Sundry
+  Creditors) for purchases. Discounts, extra charges and branch choice are not supported.
+- A repeated `confirm: true` call creates a second invoice; nothing de-duplicates it.
 
 ## Security behaviour
 

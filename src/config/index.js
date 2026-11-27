@@ -97,4 +97,9 @@ export const config = Object.freeze({
   mcpRequestsPerMinute: positiveNumber("MCP_REQUESTS_PER_MINUTE", 120),
   /** Incoming HTTP request timeout (must exceed journlTimeoutMs). */
   httpRequestTimeoutMs: positiveNumber("HTTP_REQUEST_TIMEOUT_MS", 60_000),
+  /**
+   * Registers the tools that create sales and purchase invoices in JournL. For testing
+   * against a test company only: leave unset in production, where the server stays read-only.
+   */
+  enableWriteTools: process.env.ENABLE_WRITE_TOOLS?.trim().toLowerCase() === "true",
 });

@@ -123,6 +123,8 @@ export async function login(email, password) {
       companyName: company?.name ?? account.companyName ?? null,
       currency: company?.countrySymbol ?? null,
       branchId: account.branchId ?? null,
+      // The company's GST state; decides CGST+SGST or IGST on invoices created through the write tools.
+      companyStateId: company?.stateId ?? null,
       // Per-feature rights for company users, as JournL returned them at login.
       permissions: Array.isArray(account.permissionData) ? account.permissionData : [],
     },
@@ -132,5 +134,11 @@ export async function login(email, password) {
 /** GET a JournL endpoint with the user's JournL token; returns the response `data`. */
 export async function get(path, query, journlToken) {
   const payload = await request("GET", path, { query, token: journlToken });
+  return payload.data;
+}
+
+/** POST a JSON body to a JournL endpoint with the user's JournL token; returns the response `data`. */
+export async function post(path, body, journlToken) {
+  const payload = await request("POST", path, { body, token: journlToken });
   return payload.data;
 }

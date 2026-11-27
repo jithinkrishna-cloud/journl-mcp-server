@@ -111,14 +111,19 @@ export function reportTool(server, { name, title, description, inputSchema, path
         const note = truncated.length ? " Some lists were shortened; ask for a narrower period or a larger maxRows to see more." : "";
         return { structuredContent, content: [{ type: "text", text: `${summarize(args)}${note}` }] };
       } catch (err) {
-        if (err instanceof JournlAuthError) {
-          if (session) revokeSession(session);
-          return errorResult(err.message);
-        }
-        if (err instanceof JournlApiError) return errorResult(err.message.startsWith("JournL ") ? err.message : `JournL: ${err.message}`);
-        logEvent("tool_failure", { tool: name, reason: err?.name ?? "Error" });
-        return errorResult("Something went wrong while reading JournL. Please try again.");
+        return failureResult(name, session, err);
       }
     }),
   );
+}
+
+/** Turns an error thrown while calling JournL into a safe tool error. */
+export function failureResult(name, session, err, action = "reading") {
+  if (err instanceof JournlAuthError) {
+    if (session) revokeSession(session);
+    return errorResult(err.message);
+  }
+  if (err instanceof JournlApiError) return errorResult(err.message.startsWith("JournL ") ? err.message : `JournL: ${err.message}`);
+  logEvent("tool_failure", { tool: name, reason: err?.name ?? "Error" });
+  return errorResult(`Something went wrong while ${action} JournL. Please try again.`);
 }

@@ -10,6 +10,8 @@ const fakeJwt = (claims) => `${b64({ alg: "HS256", typ: "JWT" })}.${b64({ exp: M
 export const USERS = {
   owner: { email: "owner@demo.test", password: "owner-pass", role: "company", id: 11, companyId: 101 },
   staff: { email: "staff@demo.test", password: "staff-pass", role: "company_user", id: 22, companyId: 101, permissions: [{ featureId: 26, view: true }] },
+  // May add sales invoices (feature 14) but not purchase invoices (feature 16).
+  clerk: { email: "clerk@demo.test", password: "clerk-pass", role: "company_user", id: 33, companyId: 101, permissions: [{ featureId: 14, view: true, add: true }, { featureId: 16, view: true, add: false }] },
   blocked: { email: "blocked@demo.test", password: "blocked-pass" },
   multi: { email: "multi@demo.test", password: "multi-pass" },
 };
@@ -47,7 +49,7 @@ export function startMockJournl() {
           role: user.role,
           branchId: user.role === "company_user" ? 1 : null,
           token,
-          companyDetails: [{ id: user.companyId, name: "Demo Co", countrySymbol: "INR" }],
+          companyDetails: [{ id: user.companyId, name: "Demo Co", countrySymbol: "INR", stateId: 18 }],
           permissionData: user.permissions ?? [],
         },
       ],
@@ -58,7 +60,7 @@ export function startMockJournl() {
   app.use((req, res, next) => {
     const token = (req.headers.authorization ?? "").replace(/^Bearer /, "");
     const user = tokens.get(token);
-    state.requests.push({ path: req.path, query: { ...req.query }, user: user?.email ?? null, companyId: user?.companyId ?? null });
+    state.requests.push({ method: req.method, path: req.path, query: { ...req.query }, body: req.body, user: user?.email ?? null, companyId: user?.companyId ?? null });
     if (!user) return res.status(401).json({ success: false, message: "jwt expired" });
     if (state.failNext) {
       const { status, body } = state.failNext;
@@ -163,6 +165,53 @@ export function startMockJournl() {
   app.get("/reports/cash-flow", (_req, res) => res.json({ success: true, data: { data: [], totals: { totalReceipts: 0, totalPayments: 0, netCashFlow: 0 } } }));
 
   app.get("/reports/closing-stock-report", (_req, res) => res.json({ success: true, data: { openingTotal: 0, result: [] } }));
+
+  // --- masters and create-voucher, for the invoice write tools ---------------------
+  // The company (login stateId 18) is in state 18.
+  const LEDGERS = {
+    30: { id: 30, name: "Acme Traders", primaryGroupId: 26, taxType: "registered", state: 18, country: 1, gstNumber: "32ABCDE1234F1Z5", billAddress: "12 Secret St", mobile: "9999999999" },
+    31: { id: 31, name: "Far Away Retail", primaryGroupId: 26, taxType: "unregistered", state: 27, country: 1 },
+    32: { id: 32, name: "Mystery Buyer", primaryGroupId: 26, taxType: "unknown", state: null, country: 1 },
+    40: { id: 40, name: "Steel Suppliers", primaryGroupId: 22, taxType: "registered", state: 27, country: 1, gstNumber: "27ABCDE1234F1Z5" },
+    41: { id: 41, name: "Local Vendor", primaryGroupId: 22, taxType: "unregistered", state: 18, country: 1 },
+    5: { id: 5, name: "HDFC Bank", primaryGroupId: 28 },
+  };
+  app.get("/companyLedgerMaster/id/:id", (req, res) => {
+    const ledger = LEDGERS[req.params.id];
+    if (!ledger) return res.status(404).json({ success: false, message: "Company Ledger Master not found" });
+    res.json({ success: true, data: { ...ledger, isDeleted: 0, openingBillEntry: [] } });
+  });
+
+  const STOCK = {
+    4: { id: 4, name: "Widget", taxPercentage: 18, baseUnitId: 2, baseUnitName: "Nos", hsnCode: "8471", isDeleted: 0 },
+    7: { id: 7, name: "Bolt", taxPercentage: 5, baseUnitId: 2, baseUnitName: "Nos", hsnCode: "7318", isDeleted: 0 },
+    8: { id: 8, name: "Rice", taxPercentage: 0, baseUnitId: 3, baseUnitName: "Kg", isDeleted: 0 },
+    9: { id: 9, name: "Old Item", taxPercentage: 18, isDeleted: 1 },
+  };
+  // Like JournL's getStockItemById, an unknown id answers success with no data.
+  app.get("/companyStockItem/:id", (req, res) => res.json({ success: true, data: STOCK[req.params.id] }));
+
+  app.get("/company-voucher-types/primary-voucher-id/:id", (req, res) => {
+    const id = Number(req.params.id);
+    const name = id === 4 ? "Sales" : id === 6 ? "Purchase" : "Other";
+    res.json({ success: true, data: [{ id, name, primaryVoucherId: id, isDeleted: 0 }, { id: 100 + id, name: `${name} B2B`, primaryVoucherId: id, isDeleted: 0 }] });
+  });
+
+  app.get("/transaction/getVoucherNo/:voucherTypeId", (req, res) => {
+    const prefix = Number(req.params.voucherTypeId) === 6 ? "PUR" : "INV";
+    res.json({ success: true, data: { voucherNo: 26, invoiceNumber: `${prefix}/26` } });
+  });
+
+  state.vouchers = [];
+  app.post("/transaction/create-voucher", (req, res) => {
+    if (state.failCreate) {
+      const { status, body } = state.failCreate;
+      state.failCreate = null;
+      return res.status(status).json(body);
+    }
+    state.vouchers.push(req.body);
+    res.status(201).json({ success: true, message: "Voucher added successfully", data: 500 + state.vouchers.length });
+  });
 
   return new Promise((resolve) => {
     const server = app.listen(0, () => resolve({ url: `http://127.0.0.1:${server.address().port}`, server, state }));
